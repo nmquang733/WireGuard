@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WireGuard Config Tool</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+    }
+    .container {
+      max-width: 600px;
+      margin: auto;
+    }
+    .input-group {
+      margin-bottom: 15px;
+    }
+    label {
+      font-weight: bold;
+      display: block;
+      margin-bottom: 5px;
+    }
+    input, textarea, button {
+      width: 100%;
+      padding: 10px;
+      margin-bottom: 10px;
+    }
+    button {
+      background-color: #007BFF;
+      color: white;
+      border: none;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #0056b3;
+    }
+    pre {
+      background: #f4f4f4;
+      padding: 15px;
+      border-radius: 5px;
+      overflow-x: auto;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>WireGuard Config Generator</h1>
+    <div class="input-group">
+      <label for="connectionName">Tên kết nối:</label>
+      <input type="text" id="connectionName" placeholder="VD: WG-222">
+    </div>
+    <div class="input-group">
+      <label for="ipPrivate">IP Private:</label>
+      <input type="text" id="ipPrivate" placeholder="VD: 192.168.1.2">
+    </div>
+    <div class="input-group">
+      <label for="ipWAN">IP WAN/DDNS:</label>
+      <input type="text" id="ipWAN" placeholder="VD: example.com">
+    </div>
+    <div class="input-group">
+      <label for="portUDP">Port UDP:</label>
+      <input type="number" id="portUDP" placeholder="VD: 51820">
+    </div>
+    <div class="input-group">
+      <label for="clientDNS">Client DNS:</label>
+      <input type="text" id="clientDNS" placeholder="VD: 8.8.8.8, 8.8.4.4">
+    </div>
+    <div class="input-group">
+      <label for="clientMTU">Client MTU:</label>
+      <input type="number" id="clientMTU" placeholder="VD: 1420">
+    </div>
+    <button onclick="generateConfig()">Tạo Config</button>
+    <h3>Config WireGuard:</h3>
+    <pre id="configOutput"></pre>
+    <h3>Script MikroTik:</h3>
+    <pre id="mikrotikOutput"></pre>
+  </div>
+
+  <script>
+    function generateConfig() {
+      const connectionName = document.getElementById("connectionName").value;
+      const ipPrivate = document.getElementById("ipPrivate").value;
+      const ipWAN = document.getElementById("ipWAN").value;
+      const portUDP = document.getElementById("portUDP").value;
+      const clientDNS = document.getElementById("clientDNS").value;
+      const clientMTU = document.getElementById("clientMTU").value;
+
+      if (!connectionName || !ipPrivate || !ipWAN || !portUDP || !clientDNS || !clientMTU) {
+        alert("Vui lòng nhập đầy đủ thông tin.");
+        return;
+      }
+
+      // Generate PrivateKey and PublicKey
+      const privateKey = generatePrivateKey();
+      const publicKey = generatePublicKey(privateKey);
+
+      // WireGuard Config
+      const configContent = `
+[Interface]
+PrivateKey = ${privateKey}
+Address = ${ipPrivate}
+DNS = ${clientDNS}
+
+[Peer]
+PublicKey = <YourServerPublicKey>
+AllowedIPs = 0.0.0.0/0, ::/0
+Endpoint = ${ipWAN}:${portUDP}
+      `;
+
+      // MikroTik Script
+      const scriptContent = `
+/interface wireguard
+add listen-port=${portUDP} private-key="${privateKey}" mtu=${clientMTU} name=${connectionName}
+/interface wireguard peers
+add allowed-address=${ipPrivate} interface=${connectionName} public-key="${publicKey}"
+/ip address
+add address=${ipPrivate} interface=${connectionName}
+/ip firewall filter
+add action=accept chain=input dst-port=${portUDP} protocol=udp comment="Allow ${portUDP} UDP"
+      `;
+
+      // Display Results
+      document.getElementById("configOutput").textContent = configContent;
+      document.getElementById("mikrotikOutput").textContent = scriptContent;
+    }
+
+    function generatePrivateKey() {
+      const randomBytes = new Uint8Array(32);
+      window.crypto.getRandomValues(randomBytes);
+      return btoa(String.fromCharCode(...randomBytes));
+    }
+
+    function generatePublicKey(privateKey) {
+      const basePoint = new Uint8Array([9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+      const privateKeyBytes = Uint8Array.from(atob(privateKey), c => c.charCodeAt(0));
+
+      const publicKeyBytes = curve25519(privateKeyBytes, basePoint);
+      return btoa(String.fromCharCode(...publicKeyBytes));
+    }
+
+    function curve25519(privateKey, basePoint) {
+      const q = basePoint.slice();
+      let z = new Uint8Array(32);
+      z[0] = 1;
+
+      for (let i = 255; i >= 0; i--) {
+        const bit = (privateKey[Math.floor(i / 8)] >> (i % 8)) & 1;
+        if (bit) {
+          add(q, basePoint);
+        }
+        double(q);
+      }
+      return q;
+    }
+
+    function add(a, b) {
+      for (let i = 0; i < a.length; i++) {
+        a[i] += b[i];
+      }
+    }
+
+    function double(a) {
+      for (let i = 0; i < a.length; i++) {
+        a[i] *= 2;
+      }
+    }
+  </script>
+</body>
+</html>
